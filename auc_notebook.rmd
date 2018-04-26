@@ -1,0 +1,180 @@
+---
+title: "AUC im Wandel der Zeiten"
+output: html_notebook
+---
+
+### Einleitung
+
+TBD
+
+### Berechnung des AUC
+
+Bevor es losgeht, werden die nötigen Libraries geladen.
+
+```{r}
+library(ggplot2)     # Plotten
+library(pROC)        # ROC berechnen
+library(caret)       # Für XGB Tree
+library(data.table)  # Weil data.table geil ist
+```
+
+Es ist interessant, einmal zum Spaß manuell den AUC zu berechnen. Was ist der
+AUC eigentlich genau? Sie ist die Fläche unter der ROC-Kurve (Receiver-Operator
+Characteristic). Was ist die ROC-Kurve?
+
+
+
+
+
+
+
+Jetzt werden Testdaten erzeugt. Sie bestehen aus einer metrischen Variablen und
+einer zu jeder Messung gehörenden Klasse. Die Klasse trennt die metrische
+Variable in zwei Verteilungen auf. Die eine Verteilung ist bimodal, nämlich eine
+Summe aus zwei Normalverteilungen. Die andere Verteilung ist nur ein einfacher
+Gauss. Die Mittelwerte der beiden Verteilungen sind gleich, d.h. der Peak der
+unimodalen Verteilung liegt genau zwischen den beiden Peaks der bimodalen
+Verteilung:
+
+```{r}
+# Die Gesamtzahl der Punkte ist size*4
+size = 10000
+
+tach = data.frame(x = c(rnorm(n = size, mean = 0.5), rnorm(size, 3.5), rnorm(2*size, 2)),
+                  y = factor(rep(c("no", "yes"), each = 2*size)))
+
+ggplot(tach, aes(x, fill = y)) + geom_density(bw = 0.05, alpha = 0.5)
+```
+
+Was genau ist der AUC? Man fährt mit einer Schwelle von links nach rechts durch
+die Daten hindurch. Für jeden Wert der Schwelle notiert man sich die False
+Positive Rate und die True Positive Rate. Danach werden die beiden Werte
+gegeneinader geplottet. Die AUC ist dann die Fläche unter dieser Kurve.
+
+Bisher haben wir den AUC immer als Maß für die Trennbarkeit der Vorhersagen
+eines Modells unter der Bedingung der binären Zielvariablen verwendet. Die obige
+Verteilung ist klar trennbar. Aber der AUC ist neutral:
+
+```{r}
+roc(tach$y, tach$x, algorithm = 3)
+```
+
+Die ROC-Kurve aber nicht!
+
+```{r}
+plot(roc(tach$y, tach$x, algorithm = 3))
+```
+
+Das zeigt uns, dass der AUC ohne die Kurve nicht unter allen Umständen
+verwendbar ist. In unserem Fall müssen wir ein Modell zu Hilfe nehmen, es auf
+die Daten trainieren und dann erneut die AUC berechnen. Nehmen wir zuerst ein
+ganz einfaches Modell. Die Betrachtung der obigen Kurve legt nahe, dass wir für
+die Mitte mit `1 < x < 3` "yes" (1) vorhersagen können und "no" (0) sonst. Wir
+bekommen eine nicht-neutrale ROC-Kurve
+
+```{r}
+tach$naive_pred = as.numeric(tach$x > 1 & tach$x < 3)
+
+plot(roc(tach$y, tach$naive_pred, algorithm = 3))
+```
+
+Und der AUC ist
+
+```{r}
+roc(tach$y, tach$naive_pred, algorithm = 3)
+```
+
+Gehen wir etwas komplexer vor und nehmen ein XGB-Tree-Modell. Die Hyperparameter
+werden nicht weiter optimiert:
+
+```{r}
+modell_xgb = train(form = as.formula("y ~ x"), data = tach, method = "xgbTree",
+                   tuneGrid = expand.grid(nrounds = 20,
+                                          max_depth = 6,
+                                          eta = 1,
+                                          gamma = 1,
+                                          colsample_bytree = 1,
+                                          subsample = 1,
+                                          min_child_weight = 1),
+                   trControl = trainControl(method = "none", classProbs = TRUE),
+                   metric = "twoClassSummary")
+
+# Die Predictions als neue Spalte anhängen
+tach$xgb_predict = predict(modell_xgb, tach, type = "prob")[, 2]
+```
+
+Jetzt können wir die Vorhersagen als neue metrische Variable verwenden und die
+Verteilungen unter Aufspaltung nach dem Label plotten:
+
+```{r}
+ggplot(tach, aes(xgb_predict, fill = y)) + geom_density(bw = 0.01, alpha = 0.5)
+```
+
+Der AUC ist entsprechend besser geworden
+
+```{r}
+roc(tach$y, tach$xgb_predict, algorithm = 3)
+```
+
+(Warum muss es immer `0.76` sein???)
+
+Dazu noch die ROC-Kurve:
+
+```{r}
+plot(roc(tach$y, tach$xgb_predict, algorithm = 3))
+```
+
+Man kann die Funktion des Modells folgendermaßen verstehen: Es hat die originale
+x-Achse genommen, in Segmente eingeteilt, und dann die Segmente nach der 
+"Approvalrate" in dem Segment neu sortiert. Nach dieser Sortierung erst ist der
+AUC ein gutes Maß für die Trennbarkeit der Verteilungen.
+
+Das ganze können wir auch manuell machen. Wir teilen die x-Achse in kleine
+Quantile ein, damit jedes Segment die gleiche Anzahl Beobachtungen hat. Das
+macht das `cut()` in Verbindung mit `quantile`. Dann bekommen die Segmente eine
+"yes-rate" ("Approvalrate") zugewiesen, indem die Anzahl der `y` mit Wert "yes"
+in dem Segment durch die Größe des Segments geteilt wird, und dann sortieren wir
+die Segmente nach ihrer yesrate. Das machen wir mit dem kleinen Trick, dass die
+Rate zu einem Faktor geändert wird, wodurch die zugrunde liegenden Levels
+sortiert werden, um dann die Levels nach `integer` zu konvertieren. Dadurch
+verändert sich die Skala, aber das passiert auch durch die obigen
+Modellierungen. Der ROC-Analyse sind die Skala sowie die Abstände zwischen den
+Bins herzlich egal, es kommt nur auf die richtige Sortierung an:
+
+```{r}
+# Ich liebe data.table!
+tachdt = as.data.table(tach)
+
+# Die Anzahl der Segmente, in die wir die x-Achse einteilen
+anz_segm = 1000
+
+tachdt$quanti = cut(tach$x, breaks = quantile(tach$x, probs = seq(0, 1, length = anz_segm + 1)),
+                    labels = as.character(seq(1, anz_segm, by = 1)), include.lowest = TRUE)
+
+# Danach berechnen wir pro Segment die "yesrate", also die Annahmerate, und
+# kleben sie an die ursprüngliche Tabelle ran.
+tachdt = merge(tachdt, tachdt[, .(yesrate = mean(ifelse(y == "yes", 1, 0))), quanti],
+               by = "quanti", all.x = TRUE, sort = FALSE)
+
+# Wenn man die yesrate auf ganze Zahlen abbildet und die Dichten getrennt nach
+# der Zielvariable plottet, kommt was schönes heraus!
+ggplot(tachdt, aes(as.integer(as.factor(yesrate)), fill = y)) + geom_density(alpha = 0.5, bw = 0.5)
+```
+
+Der AUC ist vergleichbar mit dem des XGBTree-Modells:
+
+```{r}
+roc(tachdt$y, tachdt$yesrate)
+```
+
+Und damit haben wir es! Die AUC kann nicht für allgemeine Verteilungen verwendet
+werden, sondern nur in Spezialfällen. In allen anderen Fällen sollte eine
+Sortierung stattfinden, um ein vergleichbares Maß für die Trennbarkeit/
+Unterschiedlichkeit von Verteilungen zu erhalten, indem man z.B. ein ML-Modell
+auf den Daten fittet.
+
+
+
+
+
+
