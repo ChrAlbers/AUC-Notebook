@@ -3,11 +3,84 @@ title: "AUC im Wandel der Zeiten"
 output: html_notebook
 ---
 
-### Einleitung
+## Einleitung
 
 TBD
 
-### Berechnung des AUC
+## Berechnung des AUC
+
+Es ist interessant, einmal zum Spaß manuell den AUC zu berechnen, was wir im
+Folgenden an einem einfachen Beispiel tun.
+
+### Was ist der AUC?
+
+Aber was ist der AUC eigentlich genau? Sie ist die Fläche unter der ROC-Kurve
+("ROC" = Receiver-Operator Characteristic). Was ist die ROC-Kurve? Die ROC-Kurve
+beschreibt den Zusammenhang zwischen False Positive Rate (FPR) und True Positive
+Rate (TRP) einer Verteilungen von eindimensionalen, kontinuierlichen Messwerten
+mit einer zusätzlichen beschreibenden binären Eigenschaft. Der AUC ist eine
+Zahl, die sich aus der ROC-Kurve ableitet und welche die Trennbarkeit der
+binären Eigenschaft angibt.
+
+### ROC und AUC in einem Beispiel
+
+Die abstrakte Definition läßt sich besser anhand eines Beispiels verstehen.
+
+Nehmen wir an, dass Alice und Bob ein Kabel zwischen sich als
+Kommunikationskanal verwenden wollen. Sie einigen sich darauf, dass jede Sekunde
+ein Bit übertragen werden soll. Wenn Alice eine Eins übertragen möchte, legt sie
+eine Spannung von einem Volt für die Dauer der Sekunde an das Kabel an, will sie
+sie eine Null übertragen, dann legt sie keine Spannung an. Bob hat an dem
+anderen Ende des Kabels ein Voltmeter angebracht und mittelt für den Verlauf der
+Sekunde die anliegende Spannung. Zu ihrer beider Überraschung stellt sich im
+Test heraus, dass Bob alle möglichen Spannungen mißt und nicht nur schön klar
+null und ein Volt. Um die Übertragungsqualität einmal zu testen, überträgt Alice
+daher eine Botschaft und schreibt sich genau auf, in welcher Sekunde sie welche
+Spannung angelegt hat, damit sie beide nachher vergleichen können, welche
+Spannung wann wie übertragen wurde. Hier sind die Messwerte von 8
+Beispielmessungen:
+
+```{r}
+botschaft = c(0, 1, 1, 0, 0, 1, 0, 1)
+signal = c(-0.19, 0.22, 0.40, -0.10, 0.43, 0.79, 0.25, 0.52)
+```
+
+Naiverweise könnte man annehmen, dass man auf Bobs Seite einfach eine Schwelle
+von 0.5 Volt zur Trennung der beiden Bits ansetzt, da der Wert zwischen den
+beiden Spannungen liegt. Allerdings können wir nicht sicher sein, dass das
+Rauschen in der Leitung für beide Bits gleich breit ist oder den Mittelwert 
+ungleich verschiebt. In unserem Signal sehen wir keine Spannung größer als ein
+Volt, so dass wir davon ausgehen können, dass der Mittelwert von Bit Eins in
+Wirklichkeit kleiner als ein Volt ist. Daher muss die Schwelle empirisch
+gewählt werden. Alice und Bob gehen daher alle möglichen Werte durch und
+notieren sich jeweils, wieviele Einser-Bits richtig und wieviele Nuller-Bits
+fälschlich als Eins erkannt werden. Da sie nur eine begrenzte Zahl an Messungen
+haben, müssen sie de facto nur jeweils eine Detektionsschwellen betrachten, die
+zwischen jeweils zwei Messwerten nach Sortierung liegt:
+
+```{r}
+idcs_sortierung = order(signal)
+messtabelle = data.frame(botschaft = botschaft[idcs_sortierung],
+												 signal = signal[idcs_sortierung])
+messtabelle
+```
+
+Die Schwellen legen sie als die Mitte zwischen zwei aufeinanderfolgenden Signal-
+Werten fest, plus zwei Werte außerhalb des Bereichs von Signal
+
+```{r}
+schwelle = c(min(messtabelle$signal) - 1,
+						 messtabelle$signal[-8] + diff(messtabelle$signal)/2,
+						 max(messtabelle$signal) + 1)
+```
+
+
+
+
+
+Um die Übertragung zu testen, machen Alice und Bob nun folgendes: 
+
+
 
 Bevor es losgeht, werden die nötigen Libraries geladen.
 
@@ -18,9 +91,6 @@ library(caret)       # Für XGB Tree
 library(data.table)  # Weil data.table geil ist
 ```
 
-Es ist interessant, einmal zum Spaß manuell den AUC zu berechnen. Was ist der
-AUC eigentlich genau? Sie ist die Fläche unter der ROC-Kurve (Receiver-Operator
-Characteristic). Was ist die ROC-Kurve?
 
 
 
