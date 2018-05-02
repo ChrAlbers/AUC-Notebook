@@ -72,13 +72,40 @@ Werten fest, plus zwei Werte außerhalb des Bereichs von Signal
 schwelle = c(min(messtabelle$signal) - 1,
 						 messtabelle$signal[-8] + diff(messtabelle$signal)/2,
 						 max(messtabelle$signal) + 1)
+schwelle
 ```
 
+Dies sind hypothetische Schwellen. Alle Messspanunngen, die größer sind als die
+jeweilige Schwelle, werden als Bit Eins klassifiziert. Das machen Alice und Bob
+für jede Schwelle und notieren sich die False Positives und True Positives,
+geteilt durch die Anzahl der wahren Negatives und Positives, um die Werte als
+Raten zu erhalten:
 
+```{r}
+positive_tab = data.frame(schwelle = schwelle,
+													tpr = sapply(schwelle, function(x) {
+														sum(messtabelle$botschaft[messtabelle$signal > x] == 1)
+														 })/sum(messtabelle$botschaft == 1),
+													fpr = sapply(schwelle, function(x) {
+														sum(messtabelle$botschaft[messtabelle$signal > x] == 0)
+													})/sum(messtabelle$botschaft == 0))
+positive_tab
+```
 
+Mit den Werten können wir die ROC-Kurve zeichnen:
 
+```{r}
+plot(positive_tab$fpr, positive_tab$tpr, type = "l")
+```
 
-Um die Übertragung zu testen, machen Alice und Bob nun folgendes: 
+Jetzt können wir die Fläche unter der Kurve, die "Area Under Curve", berechnen:
+
+```{r}
+0.5*0.25 + 0.75*0.25 + 1*0.5
+```
+
+Aber warum machen wir das ganze jetzt? Wir könnten 
+
 
 
 
